@@ -111,7 +111,7 @@ python src/bicep_curl_pipeline.py --video 0
 ### Running inference wrapper:
 
 ```bash
-python src/run_inference.py
+python run_inference.py
 ```
 
 ---
