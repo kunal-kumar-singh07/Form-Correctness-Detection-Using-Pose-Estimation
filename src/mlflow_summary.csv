@@ -1,0 +1,2 @@
+experiment_id,experiment_name,run_id,run_name,status,start_time,end_time,artifact_uri,param_arm_side,param_video_source,metric_avg_elbow_angle,metric_good_frames,metric_good_ratio,metric_total_frames,metric_total_reps
+0,,dab61cb9cd394dc395eb3a0ee466e486,bicep_curl_counting_run,FINISHED,2025-12-12T10:24:32.643000,2025-12-12T10:25:18.461000,file:E:/work/Form-Correctness-Detection-Using-Pose-Estimation/src/mlruns/0/dab61cb9cd394dc395eb3a0ee466e486/artifacts,left,0,123.72939861712527,425.0,0.5266418835192069,807.0,13.0
