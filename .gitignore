@@ -14,7 +14,7 @@ venv/
 # Jupyter notebooks checkpoints
 .ipynb_checkpoints/
 
-
+mlflow.db
 .vscode/
 .idea/
 *.swp
