@@ -6,7 +6,7 @@ import mlflow
 from utils_math import angle_3pts, EMASmoother
 
 
-ARM_SIDE = "left"
+ARM_SIDE = "right"
 
 # MediaPipe indices
 LEFT_SHOULDER = 11
