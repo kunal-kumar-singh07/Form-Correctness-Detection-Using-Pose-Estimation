@@ -22,6 +22,11 @@ EXTENDED_ANGLE = 150.0
 
 HYSTERESIS = 8.0
 
+ELBOW_DRIFT_PIX_THRESH = 40
+TORSO_TILT_DEG_THRESH = 15.0
+WRIST_SHOULDER_PIX_THRESH = 35
+GOOD_DEPTH_ANGLE = 30.0
+
 
 def get_xy_vis(landmarks, idx, width, height):
     try:
@@ -49,7 +54,44 @@ def angle_vertical(p1, p2):
     return ang
 
 
-def run_pipeline(video_path=0, ema_alpha=0.25):
+def evaluate_bicep_form(avg_min_angle, elbow_drift_px, torso_tilt_deg, wrist_shoulder_px):
+    suggestions = []
+    issues = 0
+
+    if avg_min_angle == "" or avg_min_angle is None:
+        pass
+    else:
+        if avg_min_angle < GOOD_DEPTH_ANGLE:
+            pass
+        else:
+            issues += 1
+            suggestions.append("Bend elbow more (reach deeper contraction)")
+
+    if elbow_drift_px and elbow_drift_px > ELBOW_DRIFT_PIX_THRESH:
+        issues += 1
+        suggestions.append("Keep elbow fixed; avoid drifting away from torso")
+
+    if torso_tilt_deg and torso_tilt_deg > TORSO_TILT_DEG_THRESH:
+        issues += 1
+        suggestions.append("Keep your torso upright; avoid leaning/rocking")
+
+    if wrist_shoulder_px and wrist_shoulder_px > WRIST_SHOULDER_PIX_THRESH:
+        issues += 1
+        suggestions.append("Keep wrist aligned with shoulder (avoid wrist drop/raise)")
+
+    if issues == 0 and avg_min_angle != "" and avg_min_angle is not None and avg_min_angle < GOOD_DEPTH_ANGLE:
+        label = "GOOD FORM"
+    elif issues <= 1:
+        label = "CAN IMPROVE"
+    else:
+        label = "BAD FORM"
+
+    suggestions = suggestions[:2]
+
+    return label, suggestions
+
+
+def run_pipeline(video_path=0, ema_alpha=0.25, mirror=False):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError("Cannot open video source: " + str(video_path))
@@ -70,7 +112,6 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
     left_reps = 0
     right_reps = 0
 
-    # per-arm current rep tracking
     left_current_rep = None
     right_current_rep = None
     rep_records = []
@@ -95,6 +136,9 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
             if not ret:
                 break
 
+            if mirror:
+                frame = cv2.flip(frame, 1)
+
             height, width, _ = frame.shape
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -102,19 +146,21 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
 
             feedback_text = "No person / pose found"
             phase_text = "phase: unknown"
+            form_label_left = ""
+            form_suggestions_left = []
+            form_label_right = ""
+            form_suggestions_right = []
 
             if getattr(results, "pose_landmarks", None):
                 landmarks = results.pose_landmarks.landmark
 
                 mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-                # left arm
                 lsx, lsy, lsvis = get_xy_vis(landmarks, LEFT_SHOULDER, width, height)
                 lex, ley, levis = get_xy_vis(landmarks, LEFT_ELBOW, width, height)
                 lwx, lwy, lwvis = get_xy_vis(landmarks, LEFT_WRIST, width, height)
                 lhx, lhy, lhvis = get_xy_vis(landmarks, LEFT_HIP, width, height)
 
-                # right arm
                 rsx, rsy, rsvis = get_xy_vis(landmarks, RIGHT_SHOULDER, width, height)
                 rex, rey, revis = get_xy_vis(landmarks, RIGHT_ELBOW, width, height)
                 rwx, rwy, rwvis = get_xy_vis(landmarks, RIGHT_WRIST, width, height)
@@ -145,7 +191,6 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
                 except Exception:
                     pass
 
-                # LEFT ARM processing
                 left_visible = (lsvis is not None and levis is not None and lwvis is not None and
                                 lsvis >= MIN_VISIBILITY and levis >= MIN_VISIBILITY and lwvis >= MIN_VISIBILITY)
                 if left_visible:
@@ -167,6 +212,8 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
                     torso_tilt_l = angle_vertical((lhx, lhy), (lsx, lsy))
                     wrist_shoulder_diff_l = abs(lwy - lsy)
 
+                    min_angle_est = smooth_angle_l
+
                     if smooth_angle_l < contracted_threshold:
                         if left_state != "going_up":
                             left_state = "going_up"
@@ -179,7 +226,7 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
                                 left_current_rep["duration_frames"] = left_current_rep["end_frame"] - left_current_rep["start_frame"]
                                 angles = left_current_rep.get("angles", [])
                                 if len(angles) > 0:
-                                    left_current_rep["avg_angle"] = float(sum(angles) / len(angles))
+                                    left_current_rep["avg_angle"] = float(np.mean(angles))
                                     left_current_rep["min_angle"] = float(min(angles))
                                     left_current_rep["max_angle"] = float(max(angles))
                                 else:
@@ -195,17 +242,28 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
                                 left_current_rep["max_torso_tilt"] = max(tilt_vals) if tilt_vals else ""
                                 left_current_rep["max_wrist_shoulder_diff"] = max(wrist_vals) if wrist_vals else ""
 
-                                left_current_rep["elbow_drift_flag"] = 1 if drift_vals and max(drift_vals) > 40 else 0
-                                left_current_rep["torso_tilt_flag"] = 1 if tilt_vals and max(tilt_vals) > 15 else 0
-                                left_current_rep["wrist_align_flag"] = 1 if wrist_vals and max(wrist_vals) > 35 else 0
+                                left_current_rep["elbow_drift_flag"] = 1 if drift_vals and max(drift_vals) > ELBOW_DRIFT_PIX_THRESH else 0
+                                left_current_rep["torso_tilt_flag"] = 1 if tilt_vals and max(tilt_vals) > TORSO_TILT_DEG_THRESH else 0
+                                left_current_rep["wrist_align_flag"] = 1 if wrist_vals and max(wrist_vals) > WRIST_SHOULDER_PIX_THRESH else 0
 
-                                if left_current_rep.get("min_angle", 9999) < 30.0:
-                                    left_current_rep["quality_note"] = "good_depth"
-                                else:
-                                    left_current_rep["quality_note"] = "shallow_depth"
+                                rep_min_angle = left_current_rep.get("min_angle", "")
+                                rep_drift_px = left_current_rep.get("max_elbow_drift", 0)
+                                rep_tilt_deg = left_current_rep.get("max_torso_tilt", 0)
+                                rep_wrist_px = left_current_rep.get("max_wrist_shoulder_diff", 0)
+
+                                label, tips = evaluate_bicep_form(rep_min_angle, rep_drift_px, rep_tilt_deg, rep_wrist_px)
+                                left_current_rep["quality_note"] = label
+                                left_current_rep["suggestions"] = "; ".join(tips) if tips else "Good"
+
                                 left_current_rep["rep_index"] = left_reps + 1
                                 left_current_rep["arm_side"] = "left"
+
                                 rep_records.append(left_current_rep)
+                                mlflow.log_param(f"left_rep_{left_current_rep['rep_index']}_quality", label)
+                                mlflow.log_param(f"left_rep_{left_current_rep['rep_index']}_tips", left_current_rep["suggestions"])
+
+                                print(f"Left REP {left_current_rep['rep_index']} | quality: {label} | tips: {left_current_rep['suggestions']}")
+
                                 left_current_rep = None
                             left_reps += 1
                         else:
@@ -228,11 +286,14 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
                         left_current_rep.setdefault("torso_tilt_vals", []).append(torso_tilt_l)
                         left_current_rep.setdefault("wrist_shoulder_vals", []).append(wrist_shoulder_diff_l)
 
+                    inst_label, inst_tips = evaluate_bicep_form(smooth_angle_l, elbow_drift_l, torso_tilt_l, wrist_shoulder_diff_l)
+                    form_label_left = inst_label
+                    form_suggestions_left = inst_tips
+
                     feedback_text = f"L angle: {smooth_angle_l:.1f} deg | Lphase: {left_phase} | Lreps: {left_reps}"
                 else:
                     feedback_text = "Landmarks low visibility - skip left"
 
-                # RIGHT ARM processing
                 right_visible = (rsvis is not None and revis is not None and rwvis is not None and
                                  rsvis >= MIN_VISIBILITY and revis >= MIN_VISIBILITY and rwvis >= MIN_VISIBILITY)
                 if right_visible:
@@ -266,7 +327,7 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
                                 right_current_rep["duration_frames"] = right_current_rep["end_frame"] - right_current_rep["start_frame"]
                                 angles = right_current_rep.get("angles", [])
                                 if len(angles) > 0:
-                                    right_current_rep["avg_angle"] = float(sum(angles) / len(angles))
+                                    right_current_rep["avg_angle"] = float(np.mean(angles))
                                     right_current_rep["min_angle"] = float(min(angles))
                                     right_current_rep["max_angle"] = float(max(angles))
                                 else:
@@ -282,17 +343,27 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
                                 right_current_rep["max_torso_tilt"] = max(tilt_vals) if tilt_vals else ""
                                 right_current_rep["max_wrist_shoulder_diff"] = max(wrist_vals) if wrist_vals else ""
 
-                                right_current_rep["elbow_drift_flag"] = 1 if drift_vals and max(drift_vals) > 40 else 0
-                                right_current_rep["torso_tilt_flag"] = 1 if tilt_vals and max(tilt_vals) > 15 else 0
-                                right_current_rep["wrist_align_flag"] = 1 if wrist_vals and max(wrist_vals) > 35 else 0
+                                right_current_rep["elbow_drift_flag"] = 1 if drift_vals and max(drift_vals) > ELBOW_DRIFT_PIX_THRESH else 0
+                                right_current_rep["torso_tilt_flag"] = 1 if tilt_vals and max(tilt_vals) > TORSO_TILT_DEG_THRESH else 0
+                                right_current_rep["wrist_align_flag"] = 1 if wrist_vals and max(wrist_vals) > WRIST_SHOULDER_PIX_THRESH else 0
 
-                                if right_current_rep.get("min_angle", 9999) < 30.0:
-                                    right_current_rep["quality_note"] = "good_depth"
-                                else:
-                                    right_current_rep["quality_note"] = "shallow_depth"
+                                rep_min_angle = right_current_rep.get("min_angle", "")
+                                rep_drift_px = right_current_rep.get("max_elbow_drift", 0)
+                                rep_tilt_deg = right_current_rep.get("max_torso_tilt", 0)
+                                rep_wrist_px = right_current_rep.get("max_wrist_shoulder_diff", 0)
+
+                                label, tips = evaluate_bicep_form(rep_min_angle, rep_drift_px, rep_tilt_deg, rep_wrist_px)
+                                right_current_rep["quality_note"] = label
+                                right_current_rep["suggestions"] = "; ".join(tips) if tips else "Good"
+
                                 right_current_rep["rep_index"] = right_reps + 1
                                 right_current_rep["arm_side"] = "right"
+
                                 rep_records.append(right_current_rep)
+                                mlflow.log_param(f"right_rep_{right_current_rep['rep_index']}_quality", label)
+                                mlflow.log_param(f"right_rep_{right_current_rep['rep_index']}_tips", right_current_rep["suggestions"])
+                                print(f"Right REP {right_current_rep['rep_index']} | quality: {label} | tips: {right_current_rep['suggestions']}")
+
                                 right_current_rep = None
                             right_reps += 1
                         else:
@@ -315,12 +386,14 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
                         right_current_rep.setdefault("torso_tilt_vals", []).append(torso_tilt_r)
                         right_current_rep.setdefault("wrist_shoulder_vals", []).append(wrist_shoulder_diff_r)
 
-                    # append right info to feedback_text
+                    inst_label_r, inst_tips_r = evaluate_bicep_form(smooth_angle_r, elbow_drift_r, torso_tilt_r, wrist_shoulder_diff_r)
+                    form_label_right = inst_label_r
+                    form_suggestions_right = inst_tips_r
+
                     feedback_text = feedback_text + " | " + f"R angle: {smooth_angle_r:.1f} deg | Rphase: {right_phase} | Rreps: {right_reps}"
                 else:
                     feedback_text = feedback_text + " | Landmarks low visibility - skip right"
 
-            # dynamic text box: scale text to fit and draw exact-size background
             font = cv2.FONT_HERSHEY_SIMPLEX
             base_scale = 0.6
             thickness1 = 2
@@ -340,7 +413,7 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
             pad_x = 12
             pad_y = 8
             box_w = min(width - 16, max(text_w1, text_w2) + 2 * pad_x)
-            box_h = text_h1 + text_h2 + pad_y * 3
+            box_h = text_h1 + text_h2 + pad_y * 4 + 40
 
             box_x1 = 8
             box_y1 = 8
@@ -356,6 +429,27 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
                         font, scale, (0, 255, 0), thickness1, lineType=cv2.LINE_AA)
             cv2.putText(frame, phase_text, (box_x1 + pad_x, line2_y),
                         font, scale, (200, 200, 0), thickness2, lineType=cv2.LINE_AA)
+
+            sug_y = line2_y + pad_y + 8
+            if form_label_left:
+                cv2.putText(frame, f"Lform: {form_label_left}", (box_x1 + pad_x, sug_y),
+                            font, 0.55, (0, 255, 0) if form_label_left == "GOOD FORM" else (0, 215, 255) if form_label_left == "CAN IMPROVE" else (0, 128, 255),
+                            1, cv2.LINE_AA)
+                sug_y += 20
+                if form_suggestions_left:
+                    cv2.putText(frame, "L tip: " + ("; ".join(form_suggestions_left)), (box_x1 + pad_x, sug_y),
+                                font, 0.48, (220, 220, 220), 1, cv2.LINE_AA)
+                    sug_y += 20
+
+            if form_label_right:
+                cv2.putText(frame, f"Rform: {form_label_right}", (box_x1 + pad_x, sug_y),
+                            font, 0.55, (0, 255, 0) if form_label_right == "GOOD FORM" else (0, 215, 255) if form_label_right == "CAN IMPROVE" else (0, 128, 255),
+                            1, cv2.LINE_AA)
+                sug_y += 20
+                if form_suggestions_right:
+                    cv2.putText(frame, "R tip: " + ("; ".join(form_suggestions_right)), (box_x1 + pad_x, sug_y),
+                                font, 0.48, (220, 220, 220), 1, cv2.LINE_AA)
+                    sug_y += 20
 
             cv2.imshow("Bicep Curl Rep Counter - press q to quit", frame)
 
@@ -384,7 +478,8 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
             "elbow_drift_flag",
             "torso_tilt_flag",
             "wrist_align_flag",
-            "quality_note"
+            "quality_note",
+            "suggestions"
         ]
         try:
             with open(csv_name, "w", newline="", encoding="utf-8") as fh:
@@ -406,7 +501,8 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
                         "elbow_drift_flag": r.get("elbow_drift_flag", ""),
                         "torso_tilt_flag": r.get("torso_tilt_flag", ""),
                         "wrist_align_flag": r.get("wrist_align_flag", ""),
-                        "quality_note": r.get("quality_note", "")
+                        "quality_note": r.get("quality_note", ""),
+                        "suggestions": r.get("suggestions", "")
                     }
                     writer.writerow(row)
             mlflow.log_artifact(csv_name)
@@ -414,7 +510,7 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
             print("Could not write or log rep_summary.csv")
 
     if total_frames > 0:
-        good_ratio = float(good_frames) / float(total_frames)
+        good_ratio = float(good_frames) / float(total_frames) if total_frames else 0.0
         avg_angle_left = float(np.mean(smooth_angles_left)) if len(smooth_angles_left) > 0 else 0.0
         avg_angle_right = float(np.mean(smooth_angles_right)) if len(smooth_angles_right) > 0 else 0.0
 
@@ -444,4 +540,4 @@ def run_pipeline(video_path=0, ema_alpha=0.25):
 
 
 if __name__ == "__main__":
-    run_pipeline(video_path=0)
+    run_pipeline(video_path=0, ema_alpha=0.25, mirror=False)

@@ -1,4 +1,0 @@
-experiment_id,experiment_name,run_id,run_name,status,start_time,end_time,artifact_uri
-0,,394e1779466948b48a1ee3ff13c03f80,bicep_curl_counting_run,FINISHED,2025-12-12T11:41:34.165000,2025-12-12T11:41:35.988000,file:E:/work/Form-Correctness-Detection-Using-Pose-Estimation/mlruns/0/394e1779466948b48a1ee3ff13c03f80/artifacts
-0,,ba671f0c74534ff58a67620b3c569a67,bicep_curl_counting_run,FINISHED,2025-12-12T11:40:45.940000,2025-12-12T11:40:49.203000,file:E:/work/Form-Correctness-Detection-Using-Pose-Estimation/mlruns/0/ba671f0c74534ff58a67620b3c569a67/artifacts
-0,,b289a07361d54d919c35fc3bcd96fbcc,bicep_curl_counting_run,FINISHED,2025-12-12T11:39:20.456000,2025-12-12T11:39:24.928000,file:E:/work/Form-Correctness-Detection-Using-Pose-Estimation/mlruns/0/b289a07361d54d919c35fc3bcd96fbcc/artifacts
