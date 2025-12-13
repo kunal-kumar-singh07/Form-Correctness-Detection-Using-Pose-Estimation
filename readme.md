@@ -1,7 +1,6 @@
 ## Preview
-
-
-https://github.com/user-attachments/assets/e77c5b23-72c5-40c9-bfc5-4dc3fb5ef524
+https://github.com/user-attachments/assets/efe5aa55-ebcd-4d3c-869e-5cf3477b5913
+---
 
 ## Overview
 
