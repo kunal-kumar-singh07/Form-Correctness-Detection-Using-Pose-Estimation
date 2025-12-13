@@ -1,6 +1,6 @@
-## Preview
-https://github.com/user-attachments/assets/efe5aa55-ebcd-4d3c-869e-5cf3477b5913
----
+## 🎥 Demo Video
+
+https://github.com/kunal-kumar-singh07/Form-Correctness-Detection-Using-Pose-Estimation/issues/1#issue-3725754477
 
 ## Overview
 
